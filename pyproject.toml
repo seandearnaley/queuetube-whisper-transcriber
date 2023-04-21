@@ -1,0 +1,33 @@
+[tool.poetry]
+name = "whisper-transcriber-api"
+version = "0.1.0"
+description = "Download YouTube videos using Pytube, Celery, and Redis"
+authors = ["Your Name <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.10.11"
+openai = "^0.27.4"
+colorlog = "^6.7.0"
+celery = "^5.0.0"
+whispercpp = "^0.0.17"
+numpy = "^1.24.2"
+ffmpeg-python = "^0.2.0"
+pytube = {git = "https://github.com/pishiko/pytube.git", rev = "42a7d8322dd7749a9e950baf6860d115bbeaedfc"}
+pytest-mock = "^3.10.0"
+
+[tool.poetry.group.dev.dependencies]
+python-dotenv = "^1.0.0"
+pytest = "^7.2.2"
+mypy = "^1.2.0"
+black = "^23.3.0"
+debugpy = "^1.6.7"
+pylint = "^2.17.2"
+ruff = "^0.0.261"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.poetry.scripts]
+transcribe = "main:main"
