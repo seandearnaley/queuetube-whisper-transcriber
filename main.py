@@ -1,53 +1,64 @@
-"""Download all videos from a given channel"""
-import os
-import tempfile
+"""Download all videos from a given YouTube channel."""
+from __future__ import annotations
+
+from pathlib import Path
 from typing import List
 
-from pytube import Channel, YouTube, helpers
-from tenacity import retry, stop_after_attempt, wait_fixed
+from yt_dlp import YoutubeDL
 
-CHANNEL_URL = "https://www.youtube.com/c/SabineHossenfelder"
+CHANNEL_URL = "https://www.youtube.com/@tobiasfischer1879"
 DL_PATH = "downloads"
-TEMP_EXTENSION = ".temp"
-downloaded_videos: List[str] = []
 
 
-@retry(wait=wait_fixed(60), stop=stop_after_attempt(3))
-def download_video(url: str, path: str) -> None:
-    """Download a video from a given url to a given path"""
+def download_video(url: str, path: Path) -> None:
+    """Download a video from a given url to a given path."""
     print(f"Downloading video from {url} to {path}")
-    youtube = YouTube(url)
-    video = youtube.streams.filter(progressive=True, file_extension="mp4").first()
-    if video is None:
-        return
 
-    # Download to a temp file
-    with tempfile.NamedTemporaryFile(
-        dir=path, suffix=TEMP_EXTENSION, delete=False
-    ) as temp_file:
-        temp_path = temp_file.name
-        video.download(output_path=path, filename=temp_file.name)
+    ydl_opts = {
+        "outtmpl": str(path / "%(title)s.%(ext)s"),
+        "format": "mp4/best",
+        "noplaylist": True,
+    }
 
-    # Rename the temp file back to its original filename
-    final_filename = video.default_filename
-    final_path = os.path.join(path, final_filename)
-    os.rename(temp_path, final_path)
-    downloaded_videos.append(url)
+    with YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
 
 
-def get_channel_videos(yt_url: str) -> helpers.DeferredGeneratorList:
-    """Get all videos from a given channel url"""
-    channel = Channel(yt_url)
-    print(f"Found {len(channel.video_urls)} videos")
+def get_channel_info(yt_url: str) -> dict:
+    """Get channel info from a given channel url."""
+    with YoutubeDL() as ydl:
+        channel_info = ydl.extract_info(yt_url, download=False, process=True)
 
-    return channel.video_urls
+        if not isinstance(channel_info, dict):
+            raise ValueError("Unknown type of channel_info")
+
+        return channel_info
+
+
+def get_channel_video_ids(channel_info: dict) -> List[str]:
+    """Extract video ids from channel info."""
+    if "entries" not in channel_info:
+        raise ValueError("No videos found in the channel")
+
+    return [entry["id"] for entry in channel_info["entries"]]
+
+
+def download_channel_videos(channel_video_ids: List[str], dl_path: Path) -> None:
+    """Download all videos from a list of video ids."""
+    dl_path.mkdir(parents=True, exist_ok=True)
+
+    for vid_id in channel_video_ids:
+        try:
+            download_video(f"https://www.youtube.com/watch?v={vid_id}", dl_path)
+        except ValueError as err:
+            print(f"Error {err} occurred while downloading video {vid_id}, skipping.")
 
 
 def main() -> None:
-    """Main function"""
-    channel_video_urls = get_channel_videos(CHANNEL_URL)
-    for url in channel_video_urls:
-        download_video(url, DL_PATH)
+    """Main function."""
+    channel_info = get_channel_info(CHANNEL_URL)
+    channel_video_ids = get_channel_video_ids(channel_info)
+    download_channel_videos(channel_video_ids, Path(DL_PATH + "/" + channel_info["id"]))
 
 
 if __name__ == "__main__":
