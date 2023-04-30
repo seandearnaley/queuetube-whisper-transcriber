@@ -6,7 +6,8 @@ from typing import List
 
 from yt_dlp import YoutubeDL
 
-CHANNEL_URL = "https://www.youtube.com/@tobiasfischer1879"
+# note /videos is not /shorts and the channel can return page entries with links to both
+CHANNEL_URL = "https://www.youtube.com/@sigriduk3072/videos"
 DL_PATH = "downloads"
 
 

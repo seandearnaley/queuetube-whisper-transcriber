@@ -1,0 +1,25 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./downloads:/app/downloads
+      - ./models:/app/models
+    depends_on:
+      - redis
+  redis:
+    image: "redis:latest"
+    ports:
+      - "6379:6379"
+  celery:
+    build: .
+    command: celery -A app.transcription_watcher worker --loglevel=info --concurrency 1
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ./downloads:/app/downloads
+    depends_on:
+      - redis
