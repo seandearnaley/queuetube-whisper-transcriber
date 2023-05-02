@@ -1,14 +1,14 @@
 """Download all videos from a given YouTube channel."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import List
 
 from yt_dlp import YoutubeDL
 
 # note /videos is not /shorts and the channel can return page entries with links to both
-CHANNEL_URL = "https://www.youtube.com/@sigriduk3072/videos"
-DL_PATH = "downloads"
+
+VOL_DL_PATH = "downloads"
 
 
 def download_video(url: str, path: Path) -> None:
@@ -25,41 +25,64 @@ def download_video(url: str, path: Path) -> None:
         ydl.download([url])
 
 
-def get_channel_info(yt_url: str) -> dict:
+def get_yt_info(yt_url: str) -> dict[str, str]:
     """Get channel info from a given channel url."""
     with YoutubeDL() as ydl:
-        channel_info = ydl.extract_info(yt_url, download=False, process=True)
+        yt_info = ydl.extract_info(yt_url, download=False, process=True)
 
-        if not isinstance(channel_info, dict):
-            raise ValueError("Unknown type of channel_info")
+        if not isinstance(yt_info, dict):
+            raise ValueError("Unknown type of yt_info")
 
-        return channel_info
+        return yt_info
 
 
-def get_channel_video_ids(channel_info: dict) -> List[str]:
-    """Extract video ids from channel info."""
-    if "entries" not in channel_info:
+def get_video_ids(info: dict) -> list[str]:
+    """Extract video ids from youtube dict info."""
+    if "entries" in info:
+        return [entry["id"] for entry in info["entries"]]
+    elif "id" in info:
+        return [info["id"]]
+    else:
         raise ValueError("No videos found in the channel")
 
-    return [entry["id"] for entry in channel_info["entries"]]
+
+def create_folder(name: str) -> Path:
+    """Create a folder."""
+    folder = Path(f"{VOL_DL_PATH}/{name}")
+    folder.mkdir(parents=True, exist_ok=True)
+
+    return folder
 
 
-def download_channel_videos(channel_video_ids: List[str], dl_path: Path) -> None:
-    """Download all videos from a list of video ids."""
-    dl_path.mkdir(parents=True, exist_ok=True)
+def save_yt_info_to_file(yt_info: dict, path: Path, filename: str) -> None:
+    """Save youtube info dict to file."""
+    with open(f"{path}/{filename}.info.json", "w") as f:
+        json.dump(
+            yt_info, f, indent=4
+        )  # Beautify the JSON output with 4 spaces indentation.
 
-    for vid_id in channel_video_ids:
+
+def download_videos(video_ids: list[str], path: Path) -> None:
+    """Download videos from a given list of video ids."""
+    for vid_id in video_ids:
         try:
-            download_video(f"https://www.youtube.com/watch?v={vid_id}", dl_path)
+            download_video(f"https://www.youtube.com/watch?v={vid_id}", path)
         except ValueError as err:
             print(f"Error {err} occurred while downloading video {vid_id}, skipping.")
 
 
+def get_youtube_url(url: str) -> None:
+    yt_info = get_yt_info(url)
+    dl_path = create_folder(yt_info["uploader"])
+
+    save_yt_info_to_file(yt_info, dl_path, filename=yt_info["id"])
+    video_ids = get_video_ids(yt_info)
+    download_videos(video_ids, dl_path)
+
+
 def main() -> None:
     """Main function."""
-    channel_info = get_channel_info(CHANNEL_URL)
-    channel_video_ids = get_channel_video_ids(channel_info)
-    download_channel_videos(channel_video_ids, Path(DL_PATH + "/" + channel_info["id"]))
+    get_youtube_url("https://www.youtube.com/@sigriduk3072/videos")
 
 
 if __name__ == "__main__":

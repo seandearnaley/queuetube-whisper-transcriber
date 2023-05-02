@@ -16,10 +16,24 @@ services:
       - "6379:6379"
   celery:
     build: .
-    command: celery -A app.transcription_watcher worker --loglevel=info --concurrency 1
+    command: celery -A app.transcribe_tools worker --loglevel=info --concurrency 1
     environment:
       - PYTHONPATH=/app
     volumes:
       - ./downloads:/app/downloads
     depends_on:
       - redis
+  flower:
+    image: mher/flower
+    command: celery --broker=redis://redis:6379/0 flower
+    ports:
+      - "5556:5555"
+    depends_on:
+      - redis
+  frontend:
+    build: .
+    command: sh -c "cd /frontend && yarn install && yarn dev"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/frontend

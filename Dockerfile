@@ -20,6 +20,10 @@ RUN git clone https://github.com/aarnphm/whispercpp.git && \
     python3 -m build -w && \
     pip install dist/*.whl
 
+RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - && \
+    apt-get install -y nodejs && \
+    npm install --global yarn
+
 # Copy the rest of the application code
 COPY . .
 

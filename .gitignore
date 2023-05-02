@@ -132,3 +132,19 @@ dmypy.json
 
 # models downloaded by whisper cpp
 models/
+
+.yarn/*
+!.yarn/releases
+!.yarn/plugins
+!.yarn/sdks
+!.yarn/versions
+.pnp.*
+
+
+# Dependency directories
+node_modules
+
+# Optional npm cache directory
+.npm
+
+.next

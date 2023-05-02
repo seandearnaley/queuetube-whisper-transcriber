@@ -1,37 +1,40 @@
 """ FastAPI server for downloading YouTube channels """
 import logging
-from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.transcription_watcher import process_untranscribed_videos
-from app.yt_channel_dl import (
-    download_channel_videos,
-    get_channel_info,
-    get_channel_video_ids,
-)
+from app.transcribe_tools import process_untranscribed_videos
+from app.yt_channel_dl import get_youtube_url
 
 app = FastAPI()
 
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 logging.basicConfig(filename="thread_output.log", level=logging.INFO)
 
 # TODO: change this
 DL_PATH = "downloads"
 
 
-class ChannelURL(BaseModel):
+class YouTubeURL(BaseModel):
     """Channel URL model."""
 
     url: str
 
 
-@app.post("/download_channel")
-async def download_channel(channel_url: ChannelURL):
-    """Download all videos from a given YouTube channel."""
-    channel_info = get_channel_info(channel_url.url)
-    channel_video_ids = get_channel_video_ids(channel_info)
-    download_channel_videos(channel_video_ids, Path(DL_PATH + "/" + channel_info["id"]))
+@app.post("/download_url")
+async def download_url(background_tasks: BackgroundTasks, url: YouTubeURL):
+    """Download all videos from a given YouTube URL."""
+
+    background_tasks.add_task(get_youtube_url, url.url)
 
     return {"message": "Channel download started"}
 
