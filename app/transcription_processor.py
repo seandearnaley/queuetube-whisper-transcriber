@@ -6,7 +6,12 @@ from celery.signals import worker_process_init
 
 from app.whisper_transcriber import WhisperTranscriber
 
-app = Celery("transcription_watcher", broker="redis://redis:6379/0")
+app = Celery(
+    "transcription_queue",
+    broker="redis://redis:6379/0",
+    backend="redis://redis:6379/0",
+    task_routes={"app.transcription_processor.*": {"queue": "transcription_queue"}},
+)
 
 
 def find_untranscribed_videos(directory: Path) -> List[Path]:

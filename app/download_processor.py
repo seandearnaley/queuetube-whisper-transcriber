@@ -4,36 +4,69 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from celery import Celery
+from celery.signals import worker_process_init
 from yt_dlp import YoutubeDL
+
+app = Celery(
+    "download_queue",
+    broker="redis://redis:6379/0",
+    backend="redis://redis:6379/0",
+    task_routes={"app.download_processor.*": {"queue": "download_queue"}},
+)
+
 
 # note /videos is not /shorts and the channel can return page entries with links to both
 
 VOL_DL_PATH = "downloads"
 
 
-def download_video(url: str, path: Path) -> None:
-    """Download a video from a given url to a given path."""
-    print(f"Downloading video from {url} to {path}")
+@worker_process_init.connect
+def init_worker_processes(**kwargs):
+    print("init download processor")
+    init_download_video()
+    init_get_yt_info()
+
+
+def init_download_video():
+    task = download_video
 
     ydl_opts = {
-        "outtmpl": str(path / "%(title)s.%(ext)s"),
+        "outtmpl": "downloads/%(title)s.%(ext)s",
         "format": "mp4/best",
         "noplaylist": True,
     }
 
-    with YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+    task.ydl = YoutubeDL(ydl_opts)
 
 
-def get_yt_info(yt_url: str) -> dict[str, str]:
+def init_get_yt_info():
+    task = get_yt_info
+    task.ydl = YoutubeDL()
+
+
+@app.task(bind=True)
+def download_video(self, url: str, path: str) -> None:
+    """Download a video from a given url to a given path."""
+    print(f"Downloading video from {url} to {path}")
+    self.ydl.download([url])
+
+
+def extract_yt_info(ydl: YoutubeDL, yt_url: str) -> dict[str, str]:
     """Get channel info from a given channel url."""
-    with YoutubeDL() as ydl:
-        yt_info = ydl.extract_info(yt_url, download=False, process=True)
+    print('Getting info for channel "%s"' % yt_url)
+    yt_info = ydl.extract_info(yt_url, download=False, process=True)
 
-        if not isinstance(yt_info, dict):
-            raise ValueError("Unknown type of yt_info")
+    if not isinstance(yt_info, dict):
+        raise ValueError("Unknown type of yt_info")
 
-        return yt_info
+    return yt_info
+
+
+@app.task(bind=True)
+def get_yt_info(self, yt_url: str) -> dict[str, str]:
+    """Get channel info from a given channel url."""
+    return extract_yt_info(self.ydl, yt_url)
 
 
 def get_video_ids(info: dict) -> list[str]:
@@ -66,13 +99,18 @@ def download_videos(video_ids: list[str], path: Path) -> None:
     """Download videos from a given list of video ids."""
     for vid_id in video_ids:
         try:
-            download_video(f"https://www.youtube.com/watch?v={vid_id}", path)
+            download_video.delay(f"https://www.youtube.com/watch?v={vid_id}", str(path))
         except ValueError as err:
             print(f"Error {err} occurred while downloading video {vid_id}, skipping.")
 
 
+@app.task
 def get_youtube_url(url: str) -> None:
-    yt_info = get_yt_info(url)
+    print(f"Downloading channel from {url}")
+    yt_info = extract_yt_info(
+        get_yt_info.ydl, url
+    )  # Call the new function with the ydl instance
+    print('Got info for channel "%s"' % yt_info["uploader"])
     dl_path = create_folder(yt_info["uploader"])
 
     save_yt_info_to_file(yt_info, dl_path, filename=yt_info["id"])
@@ -80,10 +118,5 @@ def get_youtube_url(url: str) -> None:
     download_videos(video_ids, dl_path)
 
 
-def main() -> None:
-    """Main function."""
-    get_youtube_url("https://www.youtube.com/@sigriduk3072/videos")
-
-
 if __name__ == "__main__":
-    main()
+    get_youtube_url("https://www.youtube.com/@sigriduk3072/videos")

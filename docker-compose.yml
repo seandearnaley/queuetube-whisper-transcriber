@@ -14,9 +14,18 @@ services:
     image: "redis:latest"
     ports:
       - "6379:6379"
-  celery:
+  celery_transcription:
     build: .
-    command: celery -A app.transcribe_tools worker --loglevel=info --concurrency 1
+    command: celery -A app.transcription_processor worker --loglevel=info --concurrency 1 -Q transcription_queue
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ./downloads:/app/downloads
+    depends_on:
+      - redis
+  celery_download:
+    build: .
+    command: celery -A app.download_processor worker --loglevel=info --concurrency 1 -Q download_queue
     environment:
       - PYTHONPATH=/app
     volumes:

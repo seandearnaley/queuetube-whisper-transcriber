@@ -1,12 +1,12 @@
 """ FastAPI server for downloading YouTube channels """
 import logging
 
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.transcribe_tools import process_untranscribed_videos
-from app.yt_channel_dl import get_youtube_url
+from app.download_processor import get_youtube_url
+from app.transcription_processor import process_untranscribed_videos
 
 app = FastAPI()
 
@@ -31,10 +31,10 @@ class YouTubeURL(BaseModel):
 
 
 @app.post("/download_url")
-async def download_url(background_tasks: BackgroundTasks, url: YouTubeURL):
+async def download_url(url: YouTubeURL):
     """Download all videos from a given YouTube URL."""
-
-    background_tasks.add_task(get_youtube_url, url.url)
+    print("hello")
+    get_youtube_url.delay(url.url)
 
     return {"message": "Channel download started"}
 
@@ -42,7 +42,7 @@ async def download_url(background_tasks: BackgroundTasks, url: YouTubeURL):
 @app.post("/process_untranscribed_videos")
 async def process_videos():
     """Process untranscribed videos in the specified directory."""
-    process_untranscribed_videos(DL_PATH)
+    process_untranscribed_videos.delay(DL_PATH)
     return {"message": "Processing untranscribed videos started"}
 
 
