@@ -5,9 +5,6 @@ services:
     build: .
     ports:
       - "8000:8000"
-    volumes:
-      - ./downloads:/app/downloads
-      - ./models:/app/models
     depends_on:
       - redis
   redis:
@@ -21,6 +18,7 @@ services:
       - PYTHONPATH=/app
     volumes:
       - ./downloads:/app/downloads
+      - ./models:/app/models
     depends_on:
       - redis
   celery_download:

@@ -31,13 +31,13 @@ def init_worker_processes(**kwargs):
 def init_download_video():
     task = download_video
 
-    ydl_opts = {
+    download_options = {
         "outtmpl": "downloads/%(title)s.%(ext)s",
         "format": "mp4/best",
         "noplaylist": True,
     }
 
-    task.ydl = YoutubeDL(ydl_opts)
+    task.ydl = YoutubeDL(download_options)
 
 
 def init_get_yt_info():
