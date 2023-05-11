@@ -5,6 +5,8 @@ services:
     build: .
     ports:
       - "8000:8000"
+    volumes:
+      - .:/app # Mount your local code to the container
     depends_on:
       - redis
   redis:
@@ -17,6 +19,7 @@ services:
     environment:
       - PYTHONPATH=/app
     volumes:
+      - .:/app # Mount your local code to the container
       - ./downloads:/app/downloads
       - ./models:/app/models
     depends_on:
@@ -27,6 +30,7 @@ services:
     environment:
       - PYTHONPATH=/app
     volumes:
+      - .:/app # Mount your local code to the container
       - ./downloads:/app/downloads
     depends_on:
       - redis

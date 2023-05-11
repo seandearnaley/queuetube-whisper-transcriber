@@ -18,31 +18,33 @@ app = Celery(
 
 # note /videos is not /shorts and the channel can return page entries with links to both
 
-VOL_DL_PATH = "downloads"
+DOWNLOAD_PATH = "downloads"
 
 
 @worker_process_init.connect
-def init_worker_processes(**kwargs):
+def init_worker_processes(**kwargs) -> None:
+    """
+    Initialize the worker processes.
+    We do this because we want to initialize the YoutubeDL instance
+    only once per worker process.
+    """
     print("init download processor")
     init_download_video()
     init_get_yt_info()
 
 
-def init_download_video():
-    task = download_video
-
-    download_options = {
-        "outtmpl": "downloads/%(title)s.%(ext)s",
-        "format": "mp4/best",
-        "noplaylist": True,
-    }
-
-    task.ydl = YoutubeDL(download_options)
+def init_download_video() -> None:
+    download_video.ydl = YoutubeDL(
+        {
+            "outtmpl": f"{DOWNLOAD_PATH}/%(title)s.%(ext)s",
+            "format": "mp4/best",
+            "noplaylist": True,
+        }
+    )
 
 
-def init_get_yt_info():
-    task = get_yt_info
-    task.ydl = YoutubeDL()
+def init_get_yt_info() -> None:
+    get_yt_info.ydl = YoutubeDL()
 
 
 @app.task(bind=True)
@@ -81,7 +83,7 @@ def get_video_ids(info: dict) -> list[str]:
 
 def create_folder(name: str) -> Path:
     """Create a folder."""
-    folder = Path(f"{VOL_DL_PATH}/{name}")
+    folder = Path(f"{DOWNLOAD_PATH}/{name}")
     folder.mkdir(parents=True, exist_ok=True)
 
     return folder
