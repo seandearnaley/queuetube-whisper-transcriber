@@ -3,8 +3,11 @@ from typing import List
 
 from celery import Celery
 from celery.signals import worker_process_init
+from celery.utils.log import get_task_logger
 
 from app.whisper_transcriber import WhisperTranscriber
+
+logger = get_task_logger(__name__)
 
 app = Celery(
     "transcription_queue",
@@ -50,12 +53,12 @@ def transcribe_video(self, video_path: str) -> None:
     Args:
         video_path: The path of the video file to transcribe.
     """
-    print(f"Transcribing {video_path}")
+    logger.info(f"Transcribing {video_path}")
     transcription = self.transcriber.transcribe_audio(Path(video_path))
     file_path = video_path + ".txt"
     with open(file_path, "w") as f:
         f.write(transcription)
-        print(f"Saved transcription to {file_path}")
+        logger.info(f"Saved transcription to {file_path}")
 
 
 @app.task
@@ -67,7 +70,7 @@ def process_untranscribed_videos(directory: str) -> None:
         directory: The directory to search for untranscribed videos.
     """
     untranscribed_videos = find_untranscribed_videos(Path(directory))
-    print(f"Found {len(untranscribed_videos)} untranscribed videos")
+    logger.info(f"Found {len(untranscribed_videos)} untranscribed videos")
     for video_path in untranscribed_videos:
         transcribe_video.delay(str(video_path))
 

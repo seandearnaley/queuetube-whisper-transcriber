@@ -6,7 +6,10 @@ from pathlib import Path
 
 from celery import Celery
 from celery.signals import worker_process_init
+from celery.utils.log import get_task_logger
 from yt_dlp import YoutubeDL
+
+logger = get_task_logger(__name__)
 
 app = Celery(
     "download_queue",
@@ -21,6 +24,25 @@ app = Celery(
 DOWNLOAD_PATH = "downloads"
 
 
+class DownloadProcessorLogger:
+    def debug(self, msg):
+        # For compatibility with youtube-dl, both debug and info are passed into debug
+        # You can distinguish them by the prefix '[debug] '
+        if msg.startswith("[debug] "):
+            logger.debug(msg)
+        else:
+            self.info(msg)
+
+    def info(self, msg):
+        logger.info(msg)
+
+    def warning(self, msg):
+        logger.warning(msg)
+
+    def error(self, msg):
+        logger.error(msg)
+
+
 @worker_process_init.connect
 def init_worker_processes(**kwargs) -> None:
     """
@@ -28,35 +50,30 @@ def init_worker_processes(**kwargs) -> None:
     We do this because we want to initialize the YoutubeDL instance
     only once per worker process.
     """
-    print("init download processor")
-    init_download_video()
-    init_get_yt_info()
+    logger.info("init download processor")
 
-
-def init_download_video() -> None:
-    download_video.ydl = YoutubeDL(
+    ydl = YoutubeDL(
         {
+            "logger": DownloadProcessorLogger(),
             "outtmpl": f"{DOWNLOAD_PATH}/%(title)s.%(ext)s",
             "format": "mp4/best",
             "noplaylist": True,
         }
     )
-
-
-def init_get_yt_info() -> None:
-    get_yt_info.ydl = YoutubeDL()
+    download_video.ydl = ydl
+    get_yt_info.ydl = ydl
 
 
 @app.task(bind=True)
 def download_video(self, url: str, path: str) -> None:
     """Download a video from a given url to a given path."""
-    print(f"Downloading video from {url} to {path}")
+    logger.info(f"Downloading video from {url} to {path}")
     self.ydl.download([url])
 
 
 def extract_yt_info(ydl: YoutubeDL, yt_url: str) -> dict[str, str]:
     """Get channel info from a given channel url."""
-    print('Getting info for channel "%s"' % yt_url)
+    logger.info('Getting info for channel "%s"' % yt_url)
     yt_info = ydl.extract_info(yt_url, download=False, process=True)
 
     if not isinstance(yt_info, dict):
@@ -103,16 +120,18 @@ def download_videos(video_ids: list[str], path: Path) -> None:
         try:
             download_video.delay(f"https://www.youtube.com/watch?v={vid_id}", str(path))
         except ValueError as err:
-            print(f"Error {err} occurred while downloading video {vid_id}, skipping.")
+            logger.info(
+                f"Error {err} occurred while downloading video {vid_id}, skipping."
+            )
 
 
 @app.task
 def get_youtube_url(url: str) -> None:
-    print(f"Downloading channel from {url}")
+    logger.info(f"Downloading channel from {url}")
     yt_info = extract_yt_info(
         get_yt_info.ydl, url
     )  # Call the new function with the ydl instance
-    print('Got info for channel "%s"' % yt_info["uploader"])
+    logger.info('Got info for channel "%s"' % yt_info["uploader"])
     dl_path = create_folder(yt_info["uploader"])
 
     save_yt_info_to_file(yt_info, dl_path, filename=yt_info["id"])
