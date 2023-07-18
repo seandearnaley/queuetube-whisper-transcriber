@@ -37,8 +37,7 @@ def find_untranscribed_videos(directory: Path) -> List[Path]:
 
 @worker_process_init.connect
 def init_transcriber(**kwargs):
-    task = transcribe_video
-    task.transcriber = WhisperTranscriber("tiny.en")
+    transcribe_video.transcriber = WhisperTranscriber("tiny.en")
 
 
 @app.task(bind=True)
