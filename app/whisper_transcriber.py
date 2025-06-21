@@ -1,36 +1,69 @@
-"""WhisperCC binding module"""
+"""OpenAI Whisper transcriber module"""
+
 import time
 from pathlib import Path
 
-from whispercpp import Whisper
+import whisper
 
-from app.audio_tools import NdArray, convert_to_float_array, decode_audio
+from app.audio_tools import NdArray
 
 
 class WhisperTranscriber:
-    """WhisperCC transcriber"""
+    """OpenAI Whisper transcriber"""
 
     def __init__(self, model: str = "tiny.en") -> None:
         """Initialize the transcriber"""
-        self.whisper = Whisper.from_pretrained(model, basedir="models")
+        # Force CPU usage for compatibility
+        self.device = "cpu"
+
+        # Load the model with CPU device
+        print(f"Loading Whisper model '{model}' on {self.device}")
+        self.model = whisper.load_model(model, device=self.device)
+        print(f"Model loaded successfully on {self.device}")
+
+    def _extract_text_from_result(self, result: dict) -> str:
+        """Extract text from whisper result, handling both string and list cases"""
+        text = result["text"]
+
+        # Handle case where text might be a list (though this shouldn't happen with current whisper)
+        if isinstance(text, list):
+            return " ".join(str(item) for item in text).strip()
+
+        # Handle normal string case
+        if isinstance(text, str):
+            return text.strip()
+
+        # Fallback for any other type
+        return str(text).strip()
 
     def transcribe_audio(self, audio_file: Path) -> str:
         """Transcribe audio from a file"""
-        audio_data = self._load_audio(audio_file)
         start_time = time.time()
-        transcription = self.whisper.transcribe(audio_data)
-        end_time = time.time()
-        execution_time = end_time - start_time
-        hours, remainder = divmod(execution_time, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        print(
-            "Transcription elapsed execution time:"
-            f" {int(hours)}:{int(minutes):02d}:{seconds:06.3f}"
-        )
-        return transcription
 
-    def _load_audio(self, audio_file: Path) -> NdArray:
-        """Load audio from a file"""
-        audio_data = decode_audio(audio_file)
-        audio_array = convert_to_float_array(audio_data)
-        return audio_array
+        # Transcribe using OpenAI Whisper
+        result = self.model.transcribe(str(audio_file))
+
+        # Extract text from result with proper type handling
+        transcription_text = self._extract_text_from_result(result)
+
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Transcription completed in {elapsed_time:.2f} seconds")
+
+        return transcription_text
+
+    def transcribe_ndarray(self, audio_data: NdArray) -> str:
+        """Transcribe audio from numpy array"""
+        start_time = time.time()
+
+        # Convert numpy array to torch tensor and transcribe
+        result = self.model.transcribe(audio_data)
+
+        # Extract text from result with proper type handling
+        transcription_text = self._extract_text_from_result(result)
+
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Transcription completed in {elapsed_time:.2f} seconds")
+
+        return transcription_text

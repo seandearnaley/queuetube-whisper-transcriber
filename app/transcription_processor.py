@@ -71,7 +71,11 @@ def process_untranscribed_videos(directory: str) -> None:
     untranscribed_videos = find_untranscribed_videos(Path(directory))
     logger.info(f"Found {len(untranscribed_videos)} untranscribed videos")
     for video_path in untranscribed_videos:
-        transcribe_video.delay(str(video_path))
+        # Explicitly route to the transcription_queue
+        transcribe_video.apply_async(
+            args=[str(video_path)], queue="transcription_queue"
+        )
+        logger.info(f"Queued transcription for {video_path}")
 
 
 if __name__ == "__main__":

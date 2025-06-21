@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   api:
     build: .
@@ -9,11 +7,14 @@ services:
       - .:/app # Mount your local code to the container
     depends_on:
       - redis
+    environment:
+      - PYTHONPATH=/app
   redis:
     image: "redis:latest"
     ports:
       - "6379:6379"
   celery_transcription:
+    platform: linux/amd64
     build: .
     command: celery -A app.transcription_processor worker --loglevel=info --concurrency 1 -Q transcription_queue
     environment:
@@ -42,9 +43,12 @@ services:
     depends_on:
       - redis
   frontend:
-    build: .
-    command: sh -c "cd /frontend && yarn install && yarn dev"
+    image: node:18-alpine
+    working_dir: /app
+    command: sh -c "corepack enable && yarn install && yarn dev"
     ports:
       - "3000:3000"
     volumes:
-      - ./frontend:/frontend
+      - ./frontend:/app
+    environment:
+      - NODE_ENV=development

@@ -1,31 +1,37 @@
-# Use the official Python image as the base image
-FROM python:3.10
+# Use Python 3.11 for better performance and compatibility
+FROM python:3.11-slim
 
 # Set the working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    ffmpeg libsdl2-dev alsa-utils\
+# Install system dependencies including ffmpeg
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the pyproject.toml file and install Python dependencies
-COPY pyproject.toml ./
-RUN pip install poetry && poetry config virtualenvs.create false && poetry install
+# Install PyTorch CPU-only version first (much faster with pre-built wheels)
+RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-# Clone the whispercpp repository and build the wheel
-RUN git clone https://github.com/aarnphm/whispercpp.git && \
-    cd whispercpp && \
-    git submodule update --init --recursive && \
-    python3 -m build -w && \
-    pip install dist/*.whl
+# Install OpenAI Whisper
+RUN pip install --no-cache-dir openai-whisper
 
-RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - && \
-    apt-get install -y nodejs && \
-    npm install --global yarn
+# Install other Python dependencies with latest yt-dlp
+RUN pip install --no-cache-dir \
+    celery==5.3.6 \
+    redis==5.0.1 \
+    pydantic==2.5.3 \
+    yt-dlp \
+    loguru==0.7.2 \
+    fastapi==0.109.0 \
+    uvicorn[standard]==0.26.0 \
+    requests==2.31.0 \
+    beautifulsoup4==4.12.3 \
+    aiofiles==23.2.1 \
+    python-multipart==0.0.6 \
+    ffmpeg-python==0.2.0
 
-# Copy the rest of the application code
-COPY . .
+# Copy application code
+COPY . /app/
 
 # Start the application
 CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]

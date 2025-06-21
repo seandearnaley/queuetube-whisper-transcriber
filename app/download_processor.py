@@ -1,4 +1,5 @@
 """Download all videos from a given YouTube channel."""
+
 from __future__ import annotations
 
 import json
@@ -52,12 +53,33 @@ def init_worker_processes(**kwargs) -> None:
     """
     logger.info("init download processor")
 
+    # Enhanced yt-dlp configuration to handle YouTube's anti-bot measures
     ydl = YoutubeDL(
         {
             "logger": DownloadProcessorLogger(),
-            "outtmpl": f"{DOWNLOAD_PATH}/%(title)s.%(ext)s",
-            "format": "mp4/best",
+            "outtmpl": f"{DOWNLOAD_PATH}/%(uploader)s/%(title)s.%(ext)s",
+            "format": "best[height<=720][ext=mp4]/best[ext=mp4]/best",
             "noplaylist": True,
+            # Anti-bot measures
+            "extractor_retries": 3,
+            "fragment_retries": 3,
+            "retries": 3,
+            "sleep_interval": 1,
+            "max_sleep_interval": 5,
+            # Use cookies and headers to appear more like a real browser
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate",
+                "DNT": "1",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+            },
+            # Additional options for stability
+            "socket_timeout": 30,
+            "ignoreerrors": False,
+            "no_warnings": False,
         }
     )
     download_video.ydl = ydl
@@ -68,13 +90,29 @@ def init_worker_processes(**kwargs) -> None:
 def download_video(self, url: str, path: str) -> None:
     """Download a video from a given url to a given path."""
     logger.info(f"Downloading video from {url} to {path}")
-    self.ydl.download([url])
+
+    # Create a new YoutubeDL instance with the specific output path
+    download_ydl = YoutubeDL(
+        {**self.ydl.params, "outtmpl": f"{path}/%(title)s.%(ext)s"}
+    )
+
+    try:
+        download_ydl.download([url])
+        logger.info(f"Successfully downloaded video from {url}")
+    except Exception as e:
+        logger.error(f"Failed to download video from {url}: {str(e)}")
+        raise
 
 
 def extract_yt_info(ydl: YoutubeDL, yt_url: str) -> dict[str, str]:
     """Get channel info from a given channel url."""
     logger.info('Getting info for channel "%s"' % yt_url)
-    yt_info = ydl.extract_info(yt_url, download=False, process=True)
+
+    try:
+        yt_info = ydl.extract_info(yt_url, download=False, process=True)
+    except Exception as e:
+        logger.error(f"Failed to extract info for {yt_url}: {str(e)}")
+        raise
 
     if not isinstance(yt_info, dict):
         raise ValueError("Unknown type of yt_info")
@@ -127,16 +165,38 @@ def download_videos(video_ids: list[str], path: Path) -> None:
 
 @app.task
 def get_youtube_url(url: str) -> None:
-    logger.info(f"Downloading channel from {url}")
-    yt_info = extract_yt_info(
-        get_yt_info.ydl, url
-    )  # Call the new function with the ydl instance
-    logger.info('Got info for channel "%s"' % yt_info["uploader"])
-    dl_path = create_folder(yt_info["uploader"])
+    logger.info(f"Processing URL: {url}")
 
-    save_yt_info_to_file(yt_info, dl_path, filename=yt_info["id"])
-    video_ids = get_video_ids(yt_info)
-    download_videos(video_ids, dl_path)
+    try:
+        # First, extract info to determine what type of URL this is
+        yt_info = extract_yt_info(get_yt_info.ydl, url)
+
+        # Check if this is a single video or a channel/playlist
+        if "entries" in yt_info:
+            # This is a channel or playlist
+            logger.info(f'Processing channel/playlist: "{yt_info["uploader"]}"')
+            dl_path = create_folder(yt_info["uploader"])
+            save_yt_info_to_file(yt_info, dl_path, filename=yt_info["id"])
+            video_ids = get_video_ids(yt_info)
+            download_videos(video_ids, dl_path)
+        else:
+            # This is a single video
+            video_id = yt_info["id"]
+            uploader = yt_info.get("uploader", "Unknown")
+            title = yt_info.get("title", f"Video_{video_id}")
+
+            logger.info(f'Processing single video: "{title}" by {uploader}')
+            dl_path = create_folder(uploader)
+
+            # Save video info
+            save_yt_info_to_file(yt_info, dl_path, filename=video_id)
+
+            # Download the single video
+            download_video.delay(url, str(dl_path))
+
+    except Exception as e:
+        logger.error(f"Failed to process URL {url}: {str(e)}")
+        raise
 
 
 if __name__ == "__main__":

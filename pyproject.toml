@@ -5,30 +5,31 @@ description = "Download YouTube videos using yt-dlp, Celery, and Redis, transcri
 authors = ["Your Name <you@example.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.10.11"
-openai = "^0.27.5"
-colorlog = "^6.7.0"
-celery = "^5.2.7"
-whispercpp = "^0.0.17"
-numpy = "^1.24.3"
+python = "^3.11"
+celery = "^5.3.6"
+redis = "^6.2.0"
+pydantic = "^2.5.3"
+yt-dlp = "^2025.6.9"
+loguru = "^0.7.2"
+fastapi = "^0.115.13"
+uvicorn = { extras = ["standard"], version = "^0.34.3" }
+requests = "^2.31.0"
+beautifulsoup4 = "^4.12.3"
+aiofiles = "^24.1.0"
+python-multipart = "^0.0.20"
 ffmpeg-python = "^0.2.0"
-pytest-mock = "^3.10.0"
-tenacity = "^8.2.2"
-yt-dlp = "^2023.3.4"
-uvicorn = "^0.22.0"
-fastapi = "^0.95.1"
-pydantic = "^1.10.7"
-watchdog = "^3.0.0"
-redis = "^4.5.4"
+openai-whisper = "^20240930"
+torch = "^2.4.1"
+torchaudio = "^2.4.1"
 
 [tool.poetry.group.dev.dependencies]
 python-dotenv = "^1.0.0"
-pytest = "^7.3.1"
+pytest = "^8.4.1"
 mypy = "^1.2.0"
-black = "^23.3.0"
+black = "^25.1.0"
 debugpy = "^1.6.7"
-pylint = "^2.17.3"
-ruff = "^0.0.263"
+pylint = "^3.3.7"
+ruff = "^0.12.0"
 
 [build-system]
 requires = ["poetry-core"]
