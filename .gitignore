@@ -132,6 +132,10 @@ dmypy.json
 
 # models downloaded by whisper cpp
 models/
+data/
+!data/.gitkeep
+config/
+!config/.gitkeep
 
 .yarn/*
 !.yarn/releases

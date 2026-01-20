@@ -1,18 +1,21 @@
 # QueueTube Whisper Transcriber
 
-A high-performance, CPU-optimized Docker-based service for downloading YouTube videos and transcribing them using OpenAI's Whisper ASR system. Built with FastAPI, Celery, and Redis for scalable video processing.
+A production-ready, CPU-first pipeline for downloading YouTube videos and transcribing them with faster-whisper. The stack uses FastAPI + Celery + Redis with durable job tracking and a Next.js frontend.
 
 ## ✨ Features
 
-- 🎥 **YouTube Video Download**: Download individual videos or entire channels using yt-dlp
-- 🎤 **AI Transcription**: CPU-optimized OpenAI Whisper transcription (no GPU required)
-- 🚀 **Async Processing**: Celery-based queue system for concurrent downloads and transcriptions
-- 🐳 **Docker Ready**: Complete Docker setup with optimized build times (~2 minutes)
-- 🌐 **Web Interface**: Next.js frontend for easy interaction
-- 📊 **Monitoring**: Flower dashboard for queue monitoring
-- 🔄 **Auto-Processing**: Automatic transcription of downloaded videos
+- 🎥 **YouTube download queue** via yt-dlp
+- 🎤 **Fast CPU transcription** with faster-whisper (no GPU required)
+- 🧾 **Persistent job tracking** with SQLite (Postgres-ready)
+- 📈 **Progress + event timeline** for every job
+- 🐳 **Docker-first** local dev + deploy
+- 🌐 **Web UI** (Next.js) and API docs
 
-## 🏗️ Architecture
+## 🖼️ UI Preview
+
+![QueueTube Whisper UI](docs/images/queuetube-ui.jpg)
+
+## 🧱 Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -26,281 +29,122 @@ A high-performance, CPU-optimized Docker-based service for downloading YouTube v
     ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
     │ Celery Download │ │ Celery Transc.  │ │ Flower Monitor  │
     │ Worker          │ │ Worker          │ │ Port: 5556      │
-    │ (yt-dlp)        │ │ (Whisper)       │ │                 │
     └─────────────────┘ └─────────────────┘ └─────────────────┘
 ```
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### Prereqs
 
-- Docker and Docker Compose
-- At least 4GB RAM (for Whisper model loading)
+- Docker + Docker Compose
+- 4GB+ RAM (model loading)
 
-### 1. Clone and Start
+### Start the stack
 
 ```bash
-git clone https://github.com/yourusername/queuetube-whisper-transcriber.git
-cd queuetube-whisper-transcriber
 docker compose up --build
 ```
 
-### 2. Access Services
+### Access services
 
-- **Frontend**: http://localhost:3000
-- **API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
-- **Queue Monitor**: http://localhost:5556
+- Frontend: http://localhost:3000
+- API: http://localhost:8000
+- API Docs: http://localhost:8000/docs
+- Flower: http://localhost:5556
 
-## 🧪 Testing Commands
+## 🧪 Example API calls
 
-### Download a Single Video
+### Create a job batch
 
 ```bash
-# Download a specific YouTube video
-curl -X POST "http://localhost:8000/download_url" \
+curl -X POST "http://localhost:8000/jobs" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
 ```
 
-### Process All Downloaded Videos for Transcription
+### List jobs
 
 ```bash
-# Trigger transcription of all untranscribed videos
+curl "http://localhost:8000/jobs"
+```
+
+### Fetch job events
+
+```bash
+curl "http://localhost:8000/jobs/<job_id>/events"
+```
+
+### Legacy endpoints
+
+```bash
+curl -X POST "http://localhost:8000/download_url" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
+
 curl -X POST "http://localhost:8000/process_untranscribed_videos"
 ```
 
-### Check Download Status
+## 🖥️ Frontend dev
+
+Set the API base URL if your frontend runs outside Docker:
 
 ```bash
-# Monitor download worker logs
-docker compose logs celery_download --follow --tail=20
-
-# Monitor transcription worker logs
-docker compose logs celery_transcription --follow --tail=20
+export NEXT_PUBLIC_API_BASE=http://localhost:8000
 ```
 
-### List Downloaded Files
+## ⚙️ Configuration
+
+Environment variables are prefixed with `QTUBE_`.
 
 ```bash
-# See what's been downloaded
-docker compose exec api find downloads -name "*.mp4" -o -name "*.txt" | head -10
+QTUBE_REDIS_URL=redis://redis:6379/0
+QTUBE_DATABASE_URL=sqlite:///./data/qtube.db
+QTUBE_DOWNLOADS_DIR=downloads
+QTUBE_WHISPER_MODEL=base.en
+QTUBE_TRANSCRIPTION_DEVICE=cpu
+QTUBE_TRANSCRIPTION_COMPUTE_TYPE=int8
+QTUBE_CORS_ORIGINS=["*"]
+QTUBE_YTDLP_COOKIES_FILE=/app/config/yt-cookies.txt
 ```
 
-### Test API Health
+## 🍪 yt-dlp cookies (optional)
+
+YouTube will often require cookies + a JS runtime for reliable downloads.
+This image installs Deno automatically and enables the EJS challenge solver
+via GitHub-hosted components. To add cookies:
+
+1. Export cookies to a Netscape-format text file.
+2. Place it at `./config/yt-cookies.txt` (mounted into the container).
+3. Ensure `QTUBE_YTDLP_COOKIES_FILE=/app/config/yt-cookies.txt` is set (already in docker-compose).
 
 ```bash
-# Check if API is running
-curl http://localhost:8000/health
-
-# Get API documentation
-curl http://localhost:8000/docs
+QTUBE_YTDLP_COOKIES_FILE=/app/config/yt-cookies.txt
 ```
 
-## 📁 Project Structure
+## 📁 Project Layout
 
 ```
 queuetube-whisper-transcriber/
-├── app/                          # Backend Python application
-│   ├── api.py                   # FastAPI routes and endpoints
-│   ├── audio_tools.py           # Audio processing utilities
-│   ├── download_processor.py    # YouTube download Celery tasks
-│   ├── transcription_processor.py # Whisper transcription tasks
-│   └── whisper_transcriber.py   # OpenAI Whisper integration
-├── frontend/                     # Next.js frontend
-│   ├── pages/
-│   │   ├── index.js            # Main frontend page
-│   │   └── index.module.css    # Styling
-│   └── package.json            # Frontend dependencies
-├── downloads/                    # Downloaded videos and transcripts
-├── models/                      # Whisper model cache
-├── docker-compose.yml           # Multi-service Docker setup
-├── Dockerfile                   # Optimized Python container
-└── pyproject.toml              # Python dependencies
+├── app/                          # Backend (FastAPI + Celery)
+├── frontend/                     # Next.js UI
+├── downloads/                    # Downloaded media + transcripts
+├── models/                       # Whisper model cache
+├── data/                         # SQLite database
+├── docker-compose.yml
+├── Dockerfile
+└── pyproject.toml
 ```
 
-## 🔧 Configuration
-
-### Environment Variables
+## ✅ Testing
 
 ```bash
-# Optional: Customize Redis connection
-REDIS_URL=redis://redis:6379/0
-
-# Optional: Change Whisper model size
-WHISPER_MODEL=tiny.en  # Options: tiny.en, base.en, small.en, medium.en, large
-```
-
-### Whisper Models
-
-The system uses OpenAI Whisper models. Available options:
-
-- `tiny.en` (39 MB) - Fastest, good for testing
-- `base.en` (142 MB) - Good balance of speed/accuracy
-- `small.en` (488 MB) - Better accuracy
-- `medium.en` (1.5 GB) - High accuracy
-- `large` (3 GB) - Best accuracy, multilingual
-
-## 🐳 Docker Services
-
-| Service                | Description          | Port | Purpose                     |
-| ---------------------- | -------------------- | ---- | --------------------------- |
-| `api`                  | FastAPI server       | 8000 | REST API endpoints          |
-| `redis`                | Redis broker         | 6379 | Task queue storage          |
-| `celery_download`      | Download worker      | -    | YouTube video downloading   |
-| `celery_transcription` | Transcription worker | -    | Whisper audio transcription |
-| `flower`               | Queue monitor        | 5556 | Celery task monitoring      |
-| `frontend`             | Next.js app          | 3000 | Web interface               |
-
-## 📊 Monitoring
-
-### View Queue Status
-
-Visit http://localhost:5556 to see:
-
-- Active/pending tasks
-- Worker status
-- Task history
-- Performance metrics
-
-### Check Logs
-
-```bash
-# All services
-docker compose logs --follow
-
-# Specific service
-docker compose logs celery_download --follow
-docker compose logs celery_transcription --follow
-docker compose logs api --follow
-```
-
-## 🔍 API Endpoints
-
-### Core Endpoints
-
-| Method | Endpoint                        | Description                      | Example                                      |
-| ------ | ------------------------------- | -------------------------------- | -------------------------------------------- |
-| `POST` | `/download_url`                 | Download a YouTube video         | `{"url": "https://youtube.com/watch?v=..."}` |
-| `POST` | `/process_untranscribed_videos` | Transcribe all downloaded videos | -                                            |
-| `GET`  | `/health`                       | API health check                 | -                                            |
-| `GET`  | `/docs`                         | Interactive API documentation    | -                                            |
-
-### Example API Usage
-
-```bash
-# Download a video
-curl -X POST "http://localhost:8000/download_url" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://www.youtube.com/watch?v=VYr3rMJfPFc"}'
-
-# Start transcription process
-curl -X POST "http://localhost:8000/process_untranscribed_videos"
-
-# Check API health
-curl http://localhost:8000/health
-```
-
-## 🛠️ Development
-
-### Local Development Setup
-
-```bash
-# Install dependencies
-poetry install
-
-# Run tests (if available)
+uv pip install --system -e .[dev]
 pytest
-
-# Format code
-black app/
-isort app/
-
-# Type checking
-mypy app/
 ```
 
-### Rebuilding Services
+## 🔁 Migration notes
 
-```bash
-# Rebuild specific service
-docker compose build celery_download
-docker compose up -d celery_download
-
-# Rebuild all services
-docker compose build --no-cache
-docker compose up -d
-```
-
-## 🚨 Troubleshooting
-
-### Common Issues
-
-**Build takes too long (>20 minutes)**
-
-- The optimized Dockerfile should build in ~2 minutes
-- If slow, check Docker resources and internet connection
-
-**Download fails with 403 Forbidden**
-
-- YouTube anti-bot measures
-- Try different video or wait and retry
-- Check yt-dlp version is latest
-
-**Transcription worker crashes**
-
-- Check available RAM (needs 2-4GB)
-- Try smaller Whisper model (`tiny.en`)
-- Monitor logs: `docker compose logs celery_transcription`
-
-**Frontend won't start**
-
-- Ensure Node.js image has yarn enabled
-- Check frontend logs: `docker compose logs frontend`
-
-### Debug Commands
-
-```bash
-# Check service status
-docker compose ps
-
-# Restart specific service
-docker compose restart celery_download
-
-# View resource usage
-docker stats
-
-# Clean up
-docker compose down
-docker system prune -f
-```
-
-## 📈 Performance Tips
-
-1. **CPU Optimization**: Uses CPU-only PyTorch for better Docker compatibility
-2. **Model Caching**: Whisper models are cached in `./models/` volume
-3. **Concurrent Processing**: Separate workers for download and transcription
-4. **Memory Management**: Optimized for 4GB+ RAM systems
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
-3. Make your changes
-4. Test with provided commands
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [OpenAI Whisper](https://github.com/openai/whisper) for speech recognition
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) for YouTube downloading
-- [FastAPI](https://fastapi.tiangolo.com/) for the API framework
-- [Celery](https://docs.celeryproject.org/) for task queuing
-
----
-
-**Ready to transcribe?** 🎉 Start with `docker compose up --build` and visit http://localhost:3000!
+- Backend now persists jobs in `data/qtube.db` (SQLite by default).
+- New API entrypoint: `POST /jobs` (legacy `/download_url` still works).
+- Whisper engine switched to `faster-whisper` for CPU performance.
+- Frontend moved to Next 15 + TypeScript with testing (Vitest + Playwright).

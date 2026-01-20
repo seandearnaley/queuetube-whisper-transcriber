@@ -1,69 +1,38 @@
-"""OpenAI Whisper transcriber module"""
+"""Whisper transcription using faster-whisper."""
+
+from __future__ import annotations
 
 import time
 from pathlib import Path
 
-import whisper
+from faster_whisper import WhisperModel
 
-from app.audio_tools import NdArray
+from app.config import get_settings
+
+settings = get_settings()
 
 
 class WhisperTranscriber:
-    """OpenAI Whisper transcriber"""
+    """faster-whisper transcriber."""
 
-    def __init__(self, model: str = "tiny.en") -> None:
-        """Initialize the transcriber"""
-        # Force CPU usage for compatibility
-        self.device = "cpu"
+    def __init__(self, model: str | None = None) -> None:
+        model_name = model or settings.whisper_model
+        self.device = settings.transcription_device
+        self.compute_type = settings.transcription_compute_type
 
-        # Load the model with CPU device
-        print(f"Loading Whisper model '{model}' on {self.device}")
-        self.model = whisper.load_model(model, device=self.device)
+        print(f"Loading faster-whisper model '{model_name}' on {self.device}")
+        self.model = WhisperModel(
+            model_name,
+            device=self.device,
+            compute_type=self.compute_type,
+        )
         print(f"Model loaded successfully on {self.device}")
 
-    def _extract_text_from_result(self, result: dict) -> str:
-        """Extract text from whisper result, handling both string and list cases"""
-        text = result["text"]
-
-        # Handle case where text might be a list (though this shouldn't happen with current whisper)
-        if isinstance(text, list):
-            return " ".join(str(item) for item in text).strip()
-
-        # Handle normal string case
-        if isinstance(text, str):
-            return text.strip()
-
-        # Fallback for any other type
-        return str(text).strip()
-
     def transcribe_audio(self, audio_file: Path) -> str:
-        """Transcribe audio from a file"""
+        """Transcribe audio from a file."""
         start_time = time.time()
-
-        # Transcribe using OpenAI Whisper
-        result = self.model.transcribe(str(audio_file))
-
-        # Extract text from result with proper type handling
-        transcription_text = self._extract_text_from_result(result)
-
-        end_time = time.time()
-        elapsed_time = end_time - start_time
+        segments, _info = self.model.transcribe(str(audio_file))
+        transcription_text = "".join(segment.text for segment in segments).strip()
+        elapsed_time = time.time() - start_time
         print(f"Transcription completed in {elapsed_time:.2f} seconds")
-
-        return transcription_text
-
-    def transcribe_ndarray(self, audio_data: NdArray) -> str:
-        """Transcribe audio from numpy array"""
-        start_time = time.time()
-
-        # Convert numpy array to torch tensor and transcribe
-        result = self.model.transcribe(audio_data)
-
-        # Extract text from result with proper type handling
-        transcription_text = self._extract_text_from_result(result)
-
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        print(f"Transcription completed in {elapsed_time:.2f} seconds")
-
         return transcription_text

@@ -4,11 +4,14 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - .:/app # Mount your local code to the container
+      - .:/app
+      - ./data:/app/data
     depends_on:
       - redis
     environment:
       - PYTHONPATH=/app
+      - QTUBE_DATABASE_URL=sqlite:///./data/qtube.db
+      - QTUBE_YTDLP_COOKIES_FILE=/app/config/yt-cookies.txt
   redis:
     image: "redis:latest"
     ports:
@@ -16,23 +19,31 @@ services:
   celery_transcription:
     platform: linux/amd64
     build: .
-    command: celery -A app.transcription_processor worker --loglevel=info --concurrency 1 -Q transcription_queue
+    command: celery -A app.celery_app worker --loglevel=info --concurrency 1 -Q transcription_queue
     environment:
       - PYTHONPATH=/app
+      - QTUBE_DATABASE_URL=sqlite:///./data/qtube.db
+      - QTUBE_YTDLP_COOKIES_FILE=/app/config/yt-cookies.txt
     volumes:
-      - .:/app # Mount your local code to the container
+      - .:/app
       - ./downloads:/app/downloads
       - ./models:/app/models
+      - ./data:/app/data
+      - ./config:/app/config
     depends_on:
       - redis
   celery_download:
     build: .
-    command: celery -A app.download_processor worker --loglevel=info --concurrency 1 -Q download_queue
+    command: celery -A app.celery_app worker --loglevel=info --concurrency 1 -Q download_queue
     environment:
       - PYTHONPATH=/app
+      - QTUBE_DATABASE_URL=sqlite:///./data/qtube.db
+      - QTUBE_YTDLP_COOKIES_FILE=/app/config/yt-cookies.txt
     volumes:
-      - .:/app # Mount your local code to the container
+      - .:/app
       - ./downloads:/app/downloads
+      - ./data:/app/data
+      - ./config:/app/config
     depends_on:
       - redis
   flower:
@@ -43,7 +54,7 @@ services:
     depends_on:
       - redis
   frontend:
-    image: node:18-alpine
+    image: node:20-alpine
     working_dir: /app
     command: sh -c "corepack enable && yarn install && yarn dev"
     ports:
@@ -52,3 +63,4 @@ services:
       - ./frontend:/app
     environment:
       - NODE_ENV=development
+      - NEXT_PUBLIC_API_BASE=http://localhost:8000

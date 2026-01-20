@@ -1,34 +1,35 @@
-"""Download all videos from a given YouTube channel."""
+"""Download and enqueue YouTube videos."""
 
 from __future__ import annotations
 
-import json
+from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from celery import Celery
 from celery.signals import worker_process_init
 from celery.utils.log import get_task_logger
 from yt_dlp import YoutubeDL
 
-logger = get_task_logger(__name__)
-
-app = Celery(
-    "download_queue",
-    broker="redis://redis:6379/0",
-    backend="redis://redis:6379/0",
-    task_routes={"app.download_processor.*": {"queue": "download_queue"}},
+from app.celery_app import celery_app
+from app.config import get_settings
+from app import db
+from app.models import BatchStatus, Job, JobStatus
+from app.services.jobs import (
+    add_job_event,
+    create_job,
+    set_batch_status,
+    update_batch_status,
+    update_job_status,
 )
 
+logger = get_task_logger(__name__)
+settings = get_settings()
 
-# note /videos is not /shorts and the channel can return page entries with links to both
-
-DOWNLOAD_PATH = "downloads"
+INFO_YDL: Optional[YoutubeDL] = None
 
 
 class DownloadProcessorLogger:
     def debug(self, msg):
-        # For compatibility with youtube-dl, both debug and info are passed into debug
-        # You can distinguish them by the prefix '[debug] '
         if msg.startswith("[debug] "):
             logger.debug(msg)
         else:
@@ -44,160 +45,198 @@ class DownloadProcessorLogger:
         logger.error(msg)
 
 
+def _base_ydl_params() -> Dict[str, Any]:
+    params: Dict[str, Any] = {
+        "logger": DownloadProcessorLogger(),
+        "format": "best",
+        "noplaylist": True,
+        "js_runtimes": {"deno": {"path": "/usr/local/deno/bin/deno"}},
+        "remote_components": ["ejs:github"],
+        "extractor_retries": 3,
+        "fragment_retries": 3,
+        "retries": 3,
+        "sleep_interval": 1,
+        "max_sleep_interval": 5,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+        },
+        "socket_timeout": 30,
+        "ignoreerrors": False,
+        "no_warnings": False,
+    }
+    if settings.ytdlp_cookies_file:
+        params["cookiefile"] = settings.ytdlp_cookies_file
+    return params
+
+
 @worker_process_init.connect
 def init_worker_processes(**kwargs) -> None:
-    """
-    Initialize the worker processes.
-    We do this because we want to initialize the YoutubeDL instance
-    only once per worker process.
-    """
+    """Initialize shared YoutubeDL instance per worker process."""
+    global INFO_YDL
     logger.info("init download processor")
-
-    # Enhanced yt-dlp configuration to handle YouTube's anti-bot measures
-    ydl = YoutubeDL(
-        {
-            "logger": DownloadProcessorLogger(),
-            "outtmpl": f"{DOWNLOAD_PATH}/%(uploader)s/%(title)s.%(ext)s",
-            "format": "best[height<=720][ext=mp4]/best[ext=mp4]/best",
-            "noplaylist": True,
-            # Anti-bot measures
-            "extractor_retries": 3,
-            "fragment_retries": 3,
-            "retries": 3,
-            "sleep_interval": 1,
-            "max_sleep_interval": 5,
-            # Use cookies and headers to appear more like a real browser
-            "http_headers": {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.5",
-                "Accept-Encoding": "gzip, deflate",
-                "DNT": "1",
-                "Connection": "keep-alive",
-                "Upgrade-Insecure-Requests": "1",
-            },
-            # Additional options for stability
-            "socket_timeout": 30,
-            "ignoreerrors": False,
-            "no_warnings": False,
-        }
-    )
-    download_video.ydl = ydl
-    get_yt_info.ydl = ydl
+    info_params = {**_base_ydl_params(), "skip_download": True, "noplaylist": False}
+    INFO_YDL = YoutubeDL(info_params)
 
 
-@app.task(bind=True)
-def download_video(self, url: str, path: str) -> None:
-    """Download a video from a given url to a given path."""
-    logger.info(f"Downloading video from {url} to {path}")
+def extract_yt_info(yt_url: str) -> Dict[str, Any]:
+    """Get metadata from a YouTube URL."""
+    if INFO_YDL is None:
+        raise RuntimeError("YoutubeDL is not initialized")
 
-    # Create a new YoutubeDL instance with the specific output path
-    download_ydl = YoutubeDL(
-        {**self.ydl.params, "outtmpl": f"{path}/%(title)s.%(ext)s"}
-    )
-
-    try:
-        download_ydl.download([url])
-        logger.info(f"Successfully downloaded video from {url}")
-    except Exception as e:
-        logger.error(f"Failed to download video from {url}: {str(e)}")
-        raise
-
-
-def extract_yt_info(ydl: YoutubeDL, yt_url: str) -> dict[str, str]:
-    """Get channel info from a given channel url."""
-    logger.info('Getting info for channel "%s"' % yt_url)
-
-    try:
-        yt_info = ydl.extract_info(yt_url, download=False, process=True)
-    except Exception as e:
-        logger.error(f"Failed to extract info for {yt_url}: {str(e)}")
-        raise
-
+    logger.info('Getting info for URL "%s"', yt_url)
+    yt_info = INFO_YDL.extract_info(yt_url, download=False, process=True)
     if not isinstance(yt_info, dict):
         raise ValueError("Unknown type of yt_info")
-
     return yt_info
 
 
-@app.task(bind=True)
-def get_yt_info(self, yt_url: str) -> dict[str, str]:
-    """Get channel info from a given channel url."""
-    return extract_yt_info(self.ydl, yt_url)
+def _safe_entries(info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    entries = info.get("entries")
+    if not entries:
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)]
 
 
-def get_video_ids(info: dict) -> list[str]:
-    """Extract video ids from youtube dict info."""
-    if "entries" in info:
-        return [entry["id"] for entry in info["entries"]]
-    elif "id" in info:
-        return [info["id"]]
-    else:
-        raise ValueError("No videos found in the channel")
+def _create_output_dir(uploader: str) -> Path:
+    base = Path(settings.downloads_dir)
+    target = base / uploader
+    target.mkdir(parents=True, exist_ok=True)
+    return target
 
 
-def create_folder(name: str) -> Path:
-    """Create a folder."""
-    folder = Path(f"{DOWNLOAD_PATH}/{name}")
-    folder.mkdir(parents=True, exist_ok=True)
-
-    return folder
-
-
-def save_yt_info_to_file(yt_info: dict, path: Path, filename: str) -> None:
-    """Save youtube info dict to file."""
-    with open(f"{path}/{filename}.info.json", "w") as f:
-        json.dump(
-            yt_info, f, indent=4
-        )  # Beautify the JSON output with 4 spaces indentation.
-
-
-def download_videos(video_ids: list[str], path: Path) -> None:
-    """Download videos from a given list of video ids."""
-    for vid_id in video_ids:
-        try:
-            download_video.delay(f"https://www.youtube.com/watch?v={vid_id}", str(path))
-        except ValueError as err:
-            logger.info(
-                f"Error {err} occurred while downloading video {vid_id}, skipping."
-            )
-
-
-@app.task
-def get_youtube_url(url: str) -> None:
-    logger.info(f"Processing URL: {url}")
-
+@celery_app.task(name="app.download_processor.enqueue_url")
+def enqueue_url(batch_id: str, url: str, requested_format: Optional[str] = None) -> None:
+    """Resolve a URL into one or more jobs and enqueue downloads."""
+    logger.info("Enqueueing URL %s", url)
     try:
-        # First, extract info to determine what type of URL this is
-        yt_info = extract_yt_info(get_yt_info.ydl, url)
-
-        # Check if this is a single video or a channel/playlist
-        if "entries" in yt_info:
-            # This is a channel or playlist
-            logger.info(f'Processing channel/playlist: "{yt_info["uploader"]}"')
-            dl_path = create_folder(yt_info["uploader"])
-            save_yt_info_to_file(yt_info, dl_path, filename=yt_info["id"])
-            video_ids = get_video_ids(yt_info)
-            download_videos(video_ids, dl_path)
-        else:
-            # This is a single video
-            video_id = yt_info["id"]
-            uploader = yt_info.get("uploader", "Unknown")
-            title = yt_info.get("title", f"Video_{video_id}")
-
-            logger.info(f'Processing single video: "{title}" by {uploader}')
-            dl_path = create_folder(uploader)
-
-            # Save video info
-            save_yt_info_to_file(yt_info, dl_path, filename=video_id)
-
-            # Download the single video
-            download_video.delay(url, str(dl_path))
-
-    except Exception as e:
-        logger.error(f"Failed to process URL {url}: {str(e)}")
+        yt_info = extract_yt_info(url)
+    except Exception as exc:
+        logger.error("Failed to extract info for %s: %s", url, exc)
+        with db.SessionLocal() as session:
+            set_batch_status(session, batch_id, status=BatchStatus.failed)
+            session.commit()
         raise
 
+    with db.SessionLocal() as session:
+        if "entries" in yt_info:
+            uploader = yt_info.get("uploader", "Unknown")
+            output_dir = _create_output_dir(uploader)
+            for entry in _safe_entries(yt_info):
+                video_id = entry.get("id")
+                title = entry.get("title")
+                video_url = f"https://www.youtube.com/watch?v={video_id}" if video_id else None
+                job = create_job(
+                    session,
+                    source_url=url,
+                    batch_id=batch_id,
+                    video_url=video_url,
+                    video_id=video_id,
+                    title=title,
+                    uploader=uploader,
+                    requested_format=requested_format,
+                )
+                add_job_event(session, job.id, "queued", "Queued for download", 0.0)
+                session.commit()
+                if video_url:
+                    download_video.apply_async(
+                        args=[job.id, video_url, str(output_dir)], queue="download_queue"
+                    )
+        else:
+            video_id = yt_info.get("id")
+            uploader = yt_info.get("uploader", "Unknown")
+            title = yt_info.get("title")
+            output_dir = _create_output_dir(uploader)
+            job = create_job(
+                session,
+                source_url=url,
+                batch_id=batch_id,
+                video_url=url,
+                video_id=video_id,
+                title=title,
+                uploader=uploader,
+                requested_format=requested_format,
+            )
+            add_job_event(session, job.id, "queued", "Queued for download", 0.0)
+            session.commit()
+            download_video.apply_async(
+                args=[job.id, url, str(output_dir)], queue="download_queue"
+            )
 
-if __name__ == "__main__":
-    get_youtube_url("https://www.youtube.com/@sigriduk3072/videos")
+        update_batch_status(session, batch_id)
+        session.commit()
+
+
+@celery_app.task(bind=True, name="app.download_processor.download_video")
+def download_video(self, job_id: str, url: str, output_dir: str) -> None:
+    """Download a video and enqueue transcription."""
+    logger.info("Downloading %s to %s", url, output_dir)
+    with db.SessionLocal() as session:
+        job = session.get(Job, job_id)
+        if not job:
+            logger.error("Job %s not found", job_id)
+            return
+
+        update_job_status(session, job, JobStatus.downloading, progress=0.0)
+        add_job_event(session, job.id, "downloading", "Download started", 0.0)
+        session.commit()
+
+        last_progress = 0.0
+
+        def progress_hook(data: Dict[str, Any]) -> None:
+            nonlocal last_progress
+            if data.get("status") == "downloading":
+                total = data.get("total_bytes") or data.get("total_bytes_estimate")
+                downloaded = data.get("downloaded_bytes")
+                if total and downloaded:
+                    pct = (downloaded / total) * 100
+                    overall = min(50.0, pct * 0.5)
+                    if overall - last_progress >= 1.0:
+                        job.progress = overall
+                        job.updated_at = datetime.utcnow()
+                        session.add(job)
+                        session.commit()
+                        last_progress = overall
+            elif data.get("status") == "finished":
+                filename = data.get("filename")
+                if filename:
+                    update_job_status(
+                        session,
+                        job,
+                        JobStatus.downloaded,
+                        progress=50.0,
+                        download_path=filename,
+                    )
+                    add_job_event(session, job.id, "downloaded", "Download finished", 50.0)
+                    session.commit()
+
+        format_id = job.requested_format or "best"
+        ydl = YoutubeDL(
+            {
+                **_base_ydl_params(),
+                "format": format_id,
+                "outtmpl": f"{output_dir}/%(title).200B-%(id)s.%(ext)s",
+                "progress_hooks": [progress_hook],
+            }
+        )
+
+        try:
+            ydl.download([url])
+        except Exception as exc:
+            logger.error("Failed to download %s: %s", url, exc)
+            update_job_status(session, job, JobStatus.failed, error=str(exc))
+            add_job_event(session, job.id, "failed", f"Download failed: {exc}")
+            session.commit()
+            if job.batch_id:
+                update_batch_status(session, job.batch_id)
+                session.commit()
+            return
+
+        from app.transcription_processor import transcribe_video
+
+        transcribe_video.apply_async(args=[job.id], queue="transcription_queue")
